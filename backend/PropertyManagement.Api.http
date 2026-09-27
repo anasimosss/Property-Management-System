@@ -1,0 +1,6 @@
+@PropertyManagement.Api_HostAddress = https://underrate-sharpener-colonial.ngrok-free.dev
+
+GET {{PropertyManagement.Api_HostAddress}}/weatherforecast/
+Accept: application/json
+
+###
