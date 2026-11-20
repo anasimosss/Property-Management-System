@@ -6,6 +6,7 @@ using PropertyManagement.Api.Entities.Enums;
 using PropertyManagement.Api.Services.Chapa;
 using System.Security.Claims;
 using System.Text.Json;
+using PropertyManagement.Api.Services.Notifications;
 
 namespace PropertyManagement.Api.Services.Payments;
 
@@ -13,8 +14,11 @@ public class PaymentService(
     ApplicationDbContext context,
     ChapaPaymentService chapaPaymentService,
     IHttpContextAccessor httpContextAccessor,
-    IConfiguration configuration) : IPaymentService
+    IConfiguration configuration,
+    INotificationService notificationService) : IPaymentService
 {
+    private readonly INotificationService _notificationService =
+    notificationService;
     private readonly ApplicationDbContext _context = context;
     private readonly ChapaPaymentService _chapaPaymentService = chapaPaymentService;
     private readonly IHttpContextAccessor _httpContextAccessor = httpContextAccessor;
@@ -518,6 +522,13 @@ public class PaymentService(
 
         await _context.SaveChangesAsync();
 
+        if (payment.Status == PaymentStatus.Completed)
+        {
+            await NotifyCompletedPaymentAsync(
+                payment,
+                $"payment:{payment.Id}:completed");
+        }
+
         return await GetByIdAsync(payment.Id);
     }
 
@@ -552,6 +563,9 @@ public class PaymentService(
             request.ReferenceNumber,
             request.PaymentMethod,
             request.PaymentChannel);
+
+        var wasCompleted =
+            payment.Status == PaymentStatus.Completed;
 
         var dueDate = request.DueDate;
 
@@ -597,6 +611,14 @@ public class PaymentService(
 
         await _context.SaveChangesAsync();
 
+        if (!wasCompleted &&
+            payment.Status == PaymentStatus.Completed)
+        {
+            await NotifyCompletedPaymentAsync(
+                payment,
+                $"payment:{payment.Id}:completed");
+        }
+
         return await GetByIdAsync(id);
     }
 
@@ -636,175 +658,307 @@ public class PaymentService(
             .SumAsync(p => p.Amount);
     }
 
+    private async Task NotifyCompletedPaymentAsync(
+        Payment payment,
+        string notificationKey)
+    {
+        var lease = await _context.Leases
+            .AsNoTracking()
+            .Include(l => l.Unit)
+                .ThenInclude(u => u.Building)
+                    .ThenInclude(b => b.Property)
+            .Include(l => l.Tenant)
+            .FirstOrDefaultAsync(l => l.Id == payment.LeaseId);
+
+        if (lease is null || lease.Tenant.UserId is not int tenantUserId)
+        {
+            return;
+        }
+
+        var tenantName =
+            string.IsNullOrWhiteSpace(lease.Tenant.FirstName) &&
+            string.IsNullOrWhiteSpace(lease.Tenant.LastName)
+                ? "Tenant"
+                : $"{lease.Tenant.FirstName} {lease.Tenant.LastName}".Trim();
+
+        var unitNumber = lease.Unit?.UnitNumber ?? "Unknown Unit";
+        var propertyName = lease.Unit?.Building?.Property?.Name;
+        var propertyText = string.IsNullOrWhiteSpace(propertyName)
+            ? string.Empty
+            : $" at {propertyName}";
+
+        var reference =
+            payment.ChapaTransactionReference ??
+            payment.ReferenceNumber;
+
+        var referenceText =
+            string.IsNullOrWhiteSpace(reference)
+                ? string.Empty
+                : $" Reference: {reference}.";
+
+        var paymentTypeText =
+            payment.PaymentType == PaymentType.Rent
+                ? "rent"
+                : payment.PaymentType.ToString().ToLowerInvariant();
+
+        var tenantMessage =
+            $"Your {payment.PaymentType} payment of {payment.Amount:N2} ETB for Unit {unitNumber} has been received.{referenceText}";
+
+        await _notificationService.CreateOnceAsync(
+            tenantUserId,
+            "Payment Successful",
+            tenantMessage,
+            "Payment",
+            notificationKey);
+
+        var managementTitle =
+            payment.PaymentType == PaymentType.Rent
+                ? "Rent Payment Received"
+                : "Payment Received";
+
+        var managementMessage =
+            $"{tenantName} paid ETB {payment.Amount:N2} {paymentTypeText} for Unit {unitNumber}{propertyText}. Payment method: {payment.PaymentMethod}. Channel: {payment.PaymentChannel}.{referenceText}";
+
+        var adminUserIds = await _context.Users
+            .AsNoTracking()
+            .Where(u => u.Role == UserRole.Admin && u.IsActive)
+            .Select(u => u.Id)
+            .ToListAsync();
+
+        foreach (var adminUserId in adminUserIds)
+        {
+            await _notificationService.CreateOnceAsync(
+                adminUserId,
+                managementTitle,
+                managementMessage,
+                "Payment",
+                $"payment:{payment.Id}:admin:{adminUserId}");
+        }
+
+        var propertyManagerUserIds = await _context.Users
+            .AsNoTracking()
+            .Where(u => u.Role == UserRole.PropertyManager && u.IsActive)
+            .Select(u => u.Id)
+            .ToListAsync();
+
+        foreach (var propertyManagerUserId in propertyManagerUserIds)
+        {
+            await _notificationService.CreateOnceAsync(
+                propertyManagerUserId,
+                managementTitle,
+                managementMessage,
+                "Payment",
+                $"payment:{payment.Id}:property-manager:{propertyManagerUserId}");
+        }
+    }
+
     // =========================================================
     // VERIFY CHAPA PAYMENT
     // =========================================================
-    public async Task<PaymentResponse?> VerifyChapaPaymentAsync(
-        string txRef)
+public async Task<PaymentResponse?> VerifyChapaPaymentAsync(
+    string txRef)
+{
+    if (string.IsNullOrWhiteSpace(txRef))
     {
-        if (string.IsNullOrWhiteSpace(txRef))
-        {
-            throw new InvalidOperationException(
-                "Transaction reference is required.");
-        }
-
-        // Get ALL local payments belonging to this Chapa transaction.
-        var payments = await _context.Payments
-            .Where(p =>
-                p.ChapaTransactionReference == txRef)
-            .OrderBy(p => p.Id)
-            .ToListAsync();
-
-        if (payments.Count == 0)
-        {
-            return null;
-        }
-
-        var verificationResponse =
-            await _chapaPaymentService.VerifyPaymentAsync(txRef);
-
-        using var document =
-            JsonDocument.Parse(verificationResponse);
-
-        var root = document.RootElement;
-
-        // Get the overall Chapa response status.
-        var status =
-            root.TryGetProperty(
-                "status",
-                out var statusElement)
-                ? statusElement.GetString()
-                : null;
-
-        // Get the transaction data.
-        if (!root.TryGetProperty(
-                "data",
-                out var dataElement) ||
-            dataElement.ValueKind != JsonValueKind.Object)
-        {
-            throw new InvalidOperationException(
-                "Chapa verification response does not contain transaction data.");
-        }
-
-        // Get transaction status.
-        var dataStatus =
-            dataElement.TryGetProperty(
-                "status",
-                out var dataStatusElement)
-                ? dataStatusElement.GetString()
-                : null;
-
-        var finalStatus = dataStatus ?? status;
-
-        // Verify the transaction reference returned by Chapa.
-        var chapaTxRef =
-            dataElement.TryGetProperty(
-                "tx_ref",
-                out var txRefElement)
-                ? txRefElement.GetString()
-                : null;
-
-        if (!string.IsNullOrWhiteSpace(chapaTxRef) &&
-            !string.Equals(
-                chapaTxRef,
-                txRef,
-                StringComparison.Ordinal))
-        {
-            throw new InvalidOperationException(
-                "Chapa transaction reference does not match the local payment.");
-        }
-
-        // Verify the amount returned by Chapa.
-        if (!dataElement.TryGetProperty(
-                "amount",
-                out var amountElement))
-        {
-            throw new InvalidOperationException(
-                "Chapa verification response does not contain a payment amount.");
-        }
-
-        decimal chapaAmount;
-
-        if (amountElement.ValueKind == JsonValueKind.Number)
-        {
-            chapaAmount = amountElement.GetDecimal();
-        }
-        else if (
-            amountElement.ValueKind == JsonValueKind.String &&
-            decimal.TryParse(
-                amountElement.GetString(),
-                out var parsedAmount))
-        {
-            chapaAmount = parsedAmount;
-        }
-        else
-        {
-            throw new InvalidOperationException(
-                "Chapa returned an invalid payment amount.");
-        }
-
-        // An advance payment can contain multiple local Payment rows
-        // sharing the same Chapa transaction reference.
-        //
-        // Therefore, compare Chapa's total transaction amount
-        // against the SUM of all local payments for this txRef.
-        var localTotalAmount =
-            payments.Sum(p => p.Amount);
-
-        if (chapaAmount != localTotalAmount)
-        {
-            throw new InvalidOperationException(
-                $"Chapa payment amount ({chapaAmount:N2} ETB) does not match the total local payment amount ({localTotalAmount:N2} ETB).");
-        }
-
-        // Verify currency.
-        var currency =
-            dataElement.TryGetProperty(
-                "currency",
-                out var currencyElement)
-                ? currencyElement.GetString()
-                : null;
-
-        if (!string.Equals(
-                currency,
-                "ETB",
-                StringComparison.OrdinalIgnoreCase))
-        {
-            throw new InvalidOperationException(
-                $"Unsupported payment currency returned by Chapa: {currency ?? "unknown"}.");
-        }
-
-        // Only update local payments after all important
-        // verification checks have passed.
-        if (string.Equals(
-            finalStatus,
-            "success",
-            StringComparison.OrdinalIgnoreCase))
-        {
-            foreach (var localPayment in payments)
-            {
-                localPayment.Status =
-                    PaymentStatus.Completed;
-            }
-        }
-        else if (string.Equals(
-            finalStatus,
-            "failed",
-            StringComparison.OrdinalIgnoreCase))
-        {
-            foreach (var localPayment in payments)
-            {
-                localPayment.Status =
-                    PaymentStatus.Failed;
-            }
-        }
-
-        await _context.SaveChangesAsync();
-
-        // Return the first payment as the representative
-        // payment response for the existing API contract.
-        return await GetByIdAsync(payments[0].Id);
+        throw new InvalidOperationException(
+            "Transaction reference is required.");
     }
+
+    // Get ALL local payments belonging to this Chapa transaction.
+    var payments = await _context.Payments
+    .Include(p => p.Lease)
+        .ThenInclude(l => l.Unit)
+    .Where(p =>
+        p.ChapaTransactionReference == txRef)
+    .OrderBy(p => p.Id)
+    .ToListAsync();
+
+    if (payments.Count == 0)
+    {
+        return null;
+    }
+
+    var verificationResponse =
+        await _chapaPaymentService.VerifyPaymentAsync(txRef);
+
+    using var document =
+        JsonDocument.Parse(verificationResponse);
+
+    var root = document.RootElement;
+
+    // Get the overall Chapa response status.
+    var status =
+        root.TryGetProperty(
+            "status",
+            out var statusElement)
+            ? statusElement.GetString()
+            : null;
+
+    // Get the transaction data.
+    if (!root.TryGetProperty(
+            "data",
+            out var dataElement) ||
+        dataElement.ValueKind != JsonValueKind.Object)
+    {
+        throw new InvalidOperationException(
+            "Chapa verification response does not contain transaction data.");
+    }
+
+    // Get transaction status.
+    var dataStatus =
+        dataElement.TryGetProperty(
+            "status",
+            out var dataStatusElement)
+            ? dataStatusElement.GetString()
+            : null;
+
+    var finalStatus = dataStatus ?? status;
+
+    // Get Chapa's own transaction reference.
+    //
+    // This is different from our local tx_ref.
+    var chapaReference =
+        dataElement.TryGetProperty(
+            "reference",
+            out var referenceElement)
+            ? referenceElement.GetString()
+            : null;
+
+    // Verify the transaction reference returned by Chapa.
+    var chapaTxRef =
+        dataElement.TryGetProperty(
+            "tx_ref",
+            out var txRefElement)
+            ? txRefElement.GetString()
+            : null;
+
+    if (!string.IsNullOrWhiteSpace(chapaTxRef) &&
+        !string.Equals(
+            chapaTxRef,
+            txRef,
+            StringComparison.Ordinal))
+    {
+        throw new InvalidOperationException(
+            "Chapa transaction reference does not match the local payment.");
+    }
+
+    // Verify the amount returned by Chapa.
+    if (!dataElement.TryGetProperty(
+            "amount",
+            out var amountElement))
+    {
+        throw new InvalidOperationException(
+            "Chapa verification response does not contain a payment amount.");
+    }
+
+    decimal chapaAmount;
+
+    if (amountElement.ValueKind == JsonValueKind.Number)
+    {
+        chapaAmount = amountElement.GetDecimal();
+    }
+    else if (
+        amountElement.ValueKind == JsonValueKind.String &&
+        decimal.TryParse(
+            amountElement.GetString(),
+            out var parsedAmount))
+    {
+        chapaAmount = parsedAmount;
+    }
+    else
+    {
+        throw new InvalidOperationException(
+            "Chapa returned an invalid payment amount.");
+    }
+
+    // An advance payment can contain multiple local Payment rows
+    // sharing the same Chapa transaction reference.
+    //
+    // Therefore, compare Chapa's total transaction amount
+    // against the SUM of all local payments for this txRef.
+    var localTotalAmount =
+        payments.Sum(p => p.Amount);
+
+    if (chapaAmount != localTotalAmount)
+    {
+        throw new InvalidOperationException(
+            $"Chapa payment amount ({chapaAmount:N2} ETB) does not match the total local payment amount ({localTotalAmount:N2} ETB).");
+    }
+
+    // Verify currency.
+    var currency =
+        dataElement.TryGetProperty(
+            "currency",
+            out var currencyElement)
+            ? currencyElement.GetString()
+            : null;
+
+    if (!string.Equals(
+            currency,
+            "ETB",
+            StringComparison.OrdinalIgnoreCase))
+    {
+        throw new InvalidOperationException(
+            $"Unsupported payment currency returned by Chapa: {currency ?? "unknown"}.");
+    }
+
+    // Only update local payments after all important
+    // verification checks have passed.
+    if (string.Equals(
+    finalStatus,
+    "success",
+    StringComparison.OrdinalIgnoreCase))
+{
+    var newlyCompletedPayments = payments
+        .Where(p => p.Status != PaymentStatus.Completed)
+        .ToList();
+
+    foreach (var localPayment in newlyCompletedPayments)
+    {
+        localPayment.Status =
+            PaymentStatus.Completed;
+    }
+
+    if (newlyCompletedPayments.Count > 0)
+    {
+        var firstPayment = newlyCompletedPayments[0];
+
+        await NotifyCompletedPaymentAsync(
+            firstPayment,
+            $"payment:{firstPayment.Id}:completed");
+    }
+}
+    else if (string.Equals(
+        finalStatus,
+        "failed",
+        StringComparison.OrdinalIgnoreCase))
+    {
+        foreach (var localPayment in payments)
+        {
+            localPayment.Status =
+                PaymentStatus.Failed;
+        }
+    }
+
+    await _context.SaveChangesAsync();
+
+    // Return the first payment as the representative
+    // payment response for the existing API contract.
+    var paymentResponse =
+        await GetByIdAsync(payments[0].Id);
+
+    if (paymentResponse is null)
+    {
+        return null;
+    }
+
+    // Add Chapa's own reference returned by the verification API.
+    paymentResponse.ChapaReference =
+        chapaReference;
+
+    return paymentResponse;
+}
+
 
     // =========================================================
     // INITIALIZE CHAPA PAYMENT

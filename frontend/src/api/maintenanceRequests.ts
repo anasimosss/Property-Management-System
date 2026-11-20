@@ -53,6 +53,21 @@ export const maintenanceRequestsApi = {
     return response.data;
   },
 
+  createForTenant: async (
+  requestData: {
+    title: string;
+    description: string;
+    priority: string;
+  }
+): Promise<MaintenanceRequest> => {
+  const response = await apiClient.post<MaintenanceRequest>(
+    '/api/maintenanceRequests/tenant',
+    requestData
+  );
+
+  return response.data;
+},
+
   update: async (
   id: number,
   requestData: UpdateMaintenanceRequestRequest

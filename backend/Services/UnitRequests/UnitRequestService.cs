@@ -3,16 +3,21 @@ using PropertyManagement.Api.Data;
 using PropertyManagement.Api.DTOs.UnitRequests;
 using PropertyManagement.Api.Entities;
 using PropertyManagement.Api.Entities.Enums;
+using PropertyManagement.Api.Services.Notifications;
 
 namespace PropertyManagement.Api.Services.UnitRequests;
 
 public class UnitRequestService : IUnitRequestService
 {
     private readonly ApplicationDbContext _context;
+    private readonly INotificationService _notificationService;
 
-    public UnitRequestService(ApplicationDbContext context)
+    public UnitRequestService(
+        ApplicationDbContext context,
+        INotificationService notificationService)
     {
         _context = context;
+        _notificationService = notificationService;
     }
 
     public async Task<UnitRequestResponse?> CreateAsync(
@@ -217,6 +222,23 @@ public class UnitRequestService : IUnitRequestService
 
     await _context.SaveChangesAsync();
 
+    await NotifyTenantAsync(
+        request.TenantId,
+        request.UnitId,
+        "Unit Request Approved",
+        $"Your request for Unit {unit.UnitNumber} has been approved. A lease must still be created before move-in.",
+        $"unit-request:{request.Id}:approved");
+
+    foreach (var otherRequest in otherPendingRequests)
+    {
+        await NotifyTenantAsync(
+            otherRequest.TenantId,
+            otherRequest.UnitId,
+            "Unit Request Declined",
+            $"Your request for Unit {unit.UnitNumber} was declined because the unit was allocated to another tenant.",
+            $"unit-request:{otherRequest.Id}:rejected");
+    }
+
     return await GetResponseAsync(request.Id);
 }
 
@@ -248,6 +270,22 @@ public class UnitRequestService : IUnitRequestService
                 : rejectionReason.Trim();
 
         await _context.SaveChangesAsync();
+
+        var unitNumber = await _context.Units
+            .Where(u => u.Id == request.UnitId)
+            .Select(u => u.UnitNumber)
+            .FirstOrDefaultAsync();
+
+        var reason = string.IsNullOrWhiteSpace(request.RejectionReason)
+            ? string.Empty
+            : $" Reason: {request.RejectionReason}";
+
+        await NotifyTenantAsync(
+            request.TenantId,
+            request.UnitId,
+            "Unit Request Declined",
+            $"Your request for Unit {unitNumber} was declined.{reason}",
+            $"unit-request:{request.Id}:rejected");
 
         return await GetResponseAsync(request.Id);
     }
@@ -282,5 +320,30 @@ public class UnitRequestService : IUnitRequestService
                           r.ReviewedByUser.LastName
             })
             .FirstOrDefaultAsync();
+    }
+
+    private async Task NotifyTenantAsync(
+        int tenantId,
+        int unitId,
+        string title,
+        string message,
+        string notificationKey)
+    {
+        var userId = await _context.Tenants
+            .Where(t => t.Id == tenantId)
+            .Select(t => t.UserId)
+            .FirstOrDefaultAsync();
+
+        if (!userId.HasValue)
+        {
+            return;
+        }
+
+        await _notificationService.CreateOnceAsync(
+            userId.Value,
+            title,
+            message,
+            "Unit",
+            notificationKey);
     }
 }

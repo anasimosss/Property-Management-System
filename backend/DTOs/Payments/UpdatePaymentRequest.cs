@@ -14,4 +14,6 @@ public class UpdatePaymentRequest
     public string? ReferenceNumber { get; set; }
     public string? Notes { get; set; }
     public PaymentChannel PaymentChannel { get; set; } = PaymentChannel.None;
+    public string? ChapaTransactionReference { get; set; }
+
 }

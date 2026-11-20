@@ -20,6 +20,7 @@ public class ApplicationDbContext : DbContext
     public DbSet<Expense> Expenses => Set<Expense>();
     public DbSet<MaintenanceRequest> MaintenanceRequests => Set<MaintenanceRequest>();
     public DbSet<UnitRequest> UnitRequests => Set<UnitRequest>();
+    public DbSet<Notification> Notifications => Set<Notification>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -80,6 +81,49 @@ modelBuilder.Entity<UnitRequest>(entity =>
 
             entity.HasIndex(u => u.Email).IsUnique();
         });
+
+        // Notification (User -> Notification: Cascade)
+modelBuilder.Entity<Notification>(entity =>
+{
+    entity.HasKey(n => n.Id);
+
+    entity.Property(n => n.Title)
+        .IsRequired()
+        .HasMaxLength(200);
+
+    entity.Property(n => n.Message)
+        .IsRequired()
+        .HasMaxLength(1000);
+
+    entity.Property(n => n.Type)
+        .IsRequired()
+        .HasMaxLength(50);
+
+    entity.Property(n => n.NotificationKey)
+        .HasMaxLength(200);
+
+    entity.Property(n => n.IsRead)
+        .IsRequired();
+
+    entity.Property(n => n.CreatedAtUtc)
+        .IsRequired();
+
+    entity.HasOne(n => n.User)
+        .WithMany(u => u.Notifications)
+        .HasForeignKey(n => n.UserId)
+        .OnDelete(DeleteBehavior.Cascade);
+
+    entity.HasIndex(n => new
+    {
+        n.UserId,
+        n.IsRead,
+        n.CreatedAtUtc
+    });
+
+    entity.HasIndex(n => n.NotificationKey)
+        .IsUnique()
+        .HasFilter("[NotificationKey] IS NOT NULL");
+});
 
         // Property
         modelBuilder.Entity<Property>(entity =>

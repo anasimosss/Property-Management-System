@@ -91,6 +91,18 @@ const MaintenanceRequestsPage = () => {
     );
   });
 
+  const isNewRequest = (request: MaintenanceRequest) => {
+    const createdAt = new Date(request.createdAtUtc).getTime();
+    const ageInMs = Date.now() - createdAt;
+    const newRequestWindowMs = 1000 * 60 * 60 * 24 * 2;
+
+    return (
+      ageInMs <= newRequestWindowMs &&
+      request.status.toLowerCase() !== 'resolved' &&
+      request.status.toLowerCase() !== 'cancelled'
+    );
+  };
+
   const totalRequests = requests.length;
 
   const pendingRequests = requests.filter((request) => {
@@ -705,21 +717,45 @@ const MaintenanceRequestsPage = () => {
                         key={request.id}
                         hover
                         sx={{
+                          backgroundColor: isNewRequest(request)
+                            ? '#fef3c7'
+                            : 'transparent',
                           '&:last-child td': {
                             borderBottom: 0,
                           },
                         }}
                       >
                         <TableCell>
-                          <Typography
+                          <Box
                             sx={{
-                              color: '#1e293b',
-                              fontWeight: 600,
-                              fontSize: '0.875rem',
+                              display: 'flex',
+                              alignItems: 'center',
+                              gap: 1,
                             }}
                           >
-                            {request.title}
-                          </Typography>
+                            <Typography
+                              sx={{
+                                color: '#1e293b',
+                                fontWeight: 600,
+                                fontSize: '0.875rem',
+                              }}
+                            >
+                              {request.title}
+                            </Typography>
+
+                            {isNewRequest(request) && (
+                              <Chip
+                                label="New"
+                                size="small"
+                                color="warning"
+                                sx={{
+                                  fontWeight: 700,
+                                  fontSize: '0.65rem',
+                                  height: 22,
+                                }}
+                              />
+                            )}
+                          </Box>
                         </TableCell>
 
                         <TableCell>

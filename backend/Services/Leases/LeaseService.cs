@@ -3,18 +3,23 @@ using PropertyManagement.Api.Data;
 using PropertyManagement.Api.DTOs.Leases;
 using PropertyManagement.Api.Entities;
 using PropertyManagement.Api.Entities.Enums;
+using PropertyManagement.Api.Services.Notifications;
 
 namespace PropertyManagement.Api.Services.Leases;
 
 public class LeaseService : ILeaseService
 {
     private readonly ApplicationDbContext _context;
+    private readonly INotificationService _notificationService;
 
     public bool LastDeleteHadPayments { get; private set; }
 
-    public LeaseService(ApplicationDbContext context)
+    public LeaseService(
+        ApplicationDbContext context,
+        INotificationService notificationService)
     {
         _context = context;
+        _notificationService = notificationService;
     }
 
     public async Task<List<LeaseResponse>> GetAllAsync()
@@ -219,6 +224,24 @@ public class LeaseService : ILeaseService
 
         await _context.SaveChangesAsync();
 
+        if (lease.Status == LeaseStatus.Active)
+        {
+            var today = DateOnly.FromDateTime(DateTime.UtcNow);
+            var startsTodayOrEarlier = lease.StartDate <= today;
+            var title = startsTodayOrEarlier
+                ? "Lease Started"
+                : "Lease Created";
+            var message = startsTodayOrEarlier
+                ? $"Your lease for Unit {unit.UnitNumber} is active through {lease.EndDate:dd MMM yyyy}."
+                : $"Your lease for Unit {unit.UnitNumber} is active and starts on {lease.StartDate:dd MMM yyyy}.";
+
+            await NotifyLeaseTenantAsync(
+                lease.TenantId,
+                title,
+                message,
+                $"lease:{lease.Id}:activated:{lease.TenantId}:{lease.StartDate:yyyyMMdd}");
+        }
+
         return await GetByIdAsync(lease.Id);
     }
 
@@ -262,6 +285,12 @@ public class LeaseService : ILeaseService
             request.EndDate,
             id);
 
+        var previousTenantId = lease.TenantId;
+        var previousUnitId = lease.UnitId;
+        var previousEndDate = lease.EndDate;
+        var previousStatus = lease.Status;
+        string? previousUnitNumber = null;
+
         // If the lease previously belonged to another unit,
         // restore the old unit to Vacant when appropriate.
         if (lease.UnitId != request.UnitId)
@@ -271,6 +300,8 @@ public class LeaseService : ILeaseService
 
             if (previousUnit is not null)
             {
+                previousUnitNumber = previousUnit.UnitNumber;
+
                 var anotherActiveLeaseExists =
                     await _context.Leases.AnyAsync(l =>
                         l.Id != lease.Id &&
@@ -315,6 +346,69 @@ public class LeaseService : ILeaseService
         }
 
         await _context.SaveChangesAsync();
+
+        if (request.Status == LeaseStatus.Active &&
+            (previousStatus != LeaseStatus.Active ||
+             previousTenantId != lease.TenantId))
+        {
+            if (previousStatus == LeaseStatus.Active &&
+                previousTenantId != lease.TenantId)
+            {
+                await NotifyLeaseTenantAsync(
+                    previousTenantId,
+                    "Lease Updated",
+                    $"Your lease for Unit {previousUnitNumber ?? "your unit"} has been reassigned.",
+                    $"lease:{lease.Id}:tenant-changed:{previousTenantId}:{lease.TenantId}");
+            }
+
+            var today = DateOnly.FromDateTime(DateTime.UtcNow);
+            var startsTodayOrEarlier = lease.StartDate <= today;
+            var title = startsTodayOrEarlier
+                ? "Lease Started"
+                : "Lease Created";
+            var message = startsTodayOrEarlier
+                ? $"Your lease for Unit {unit.UnitNumber} is active through {lease.EndDate:dd MMM yyyy}."
+                : $"Your lease for Unit {unit.UnitNumber} is active and starts on {lease.StartDate:dd MMM yyyy}.";
+
+            await NotifyLeaseTenantAsync(
+                lease.TenantId,
+                title,
+                message,
+                $"lease:{lease.Id}:activated:{lease.TenantId}:{lease.StartDate:yyyyMMdd}");
+        }
+            else if (previousStatus == LeaseStatus.Active &&
+                 request.Status == LeaseStatus.Active &&
+                 previousUnitId != lease.UnitId)
+            {
+                await NotifyLeaseTenantAsync(
+                lease.TenantId,
+                "Lease Unit Updated",
+                $"Your lease is now assigned to Unit {unit.UnitNumber}.",
+                $"lease:{lease.Id}:unit-changed:{previousUnitId}:{lease.UnitId}");
+            }
+        else if (previousStatus == LeaseStatus.Active &&
+                 request.Status == LeaseStatus.Active &&
+                 lease.EndDate > previousEndDate)
+        {
+            await NotifyLeaseTenantAsync(
+                lease.TenantId,
+                "Lease Renewed",
+                $"Your lease for Unit {unit.UnitNumber} has been extended through {lease.EndDate:dd MMM yyyy}.",
+                $"lease:{lease.Id}:renewed:{lease.TenantId}:{lease.EndDate:yyyyMMdd}");
+        }
+        else if (previousStatus == LeaseStatus.Active &&
+                 request.Status is LeaseStatus.Expired or LeaseStatus.TerminatedEarly)
+        {
+            var title = request.Status == LeaseStatus.Expired
+                ? "Lease Ended"
+                : "Lease Terminated";
+
+            await NotifyLeaseTenantAsync(
+                lease.TenantId,
+                title,
+                $"Your lease for Unit {unit.UnitNumber} is no longer active.",
+                $"lease:{lease.Id}:ended:{lease.TenantId}:{request.Status}");
+        }
 
         return await GetByIdAsync(lease.Id);
     }
@@ -362,6 +456,30 @@ public class LeaseService : ILeaseService
         await _context.SaveChangesAsync();
 
         return true;
+    }
+
+    private async Task NotifyLeaseTenantAsync(
+        int tenantId,
+        string title,
+        string message,
+        string notificationKey)
+    {
+        var userId = await _context.Tenants
+            .Where(t => t.Id == tenantId)
+            .Select(t => t.UserId)
+            .FirstOrDefaultAsync();
+
+        if (!userId.HasValue)
+        {
+            return;
+        }
+
+        await _notificationService.CreateOnceAsync(
+            userId.Value,
+            title,
+            message,
+            "Lease",
+            notificationKey);
     }
 
     private async Task ValidateActiveLeaseConflictAsync(

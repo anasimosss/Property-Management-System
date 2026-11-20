@@ -38,6 +38,9 @@ import { maintenanceRequestsApi } from '../api/maintenanceRequests';
 import { paymentsApi } from '../api/payments';
 import { buildingsApi } from '../api/buildings';
 import { leasesApi } from '../api/leases';
+import AssignmentIndIcon from '@mui/icons-material/AssignmentInd';
+
+
 
 const COLORS = {
   primary: '#2563EB',
@@ -85,12 +88,1558 @@ const activities = [
   },
 ];
 
-const DashboardPage = () => {
-  const { user } = useAuth();
+const MaintenanceStaffDashboard = ({
+  user,
+}: {
+  user: any;
+}) => {
   const navigate = useNavigate();
+
+  const [requests, setRequests] = useState<
+    import('../types').MaintenanceRequest[]
+  >([]);
+
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
+
+  useEffect(() => {
+    const loadMaintenanceRequests = async () => {
+      try {
+        setLoading(true);
+        setError('');
+
+        const data = await maintenanceRequestsApi.getAll();
+
+        setRequests(data);
+      } catch (err) {
+        console.error(
+          'Failed to load maintenance dashboard:',
+          err
+        );
+
+        setError(
+          err instanceof Error
+            ? err.message
+            : 'Failed to load maintenance requests.'
+        );
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    loadMaintenanceRequests();
+  }, []);
+
+  const assignedToMe = useMemo(() => {
+    return requests.filter(
+      (request) =>
+        request.assignedToUserId === Number(user?.id)
+    );
+  }, [requests, user?.id]);
+
+  const openRequests = useMemo(() => {
+    return requests.filter(
+      (request) =>
+        request.status !== 'Resolved' &&
+        request.status !== 'Cancelled'
+    );
+  }, [requests]);
+
+  const inProgressRequests = useMemo(() => {
+    return requests.filter(
+      (request) => request.status === 'InProgress'
+    );
+  }, [requests]);
+
+  const urgentRequests = useMemo(() => {
+    return requests.filter(
+      (request) =>
+        request.priority === 'Emergency' ||
+        request.priority === 'High'
+    );
+  }, [requests]);
+
+  const myInProgress = useMemo(() => {
+    return assignedToMe.filter(
+      (request) => request.status === 'InProgress'
+    );
+  }, [assignedToMe]);
+
+  const myOpen = useMemo(() => {
+    return assignedToMe.filter(
+      (request) =>
+        request.status !== 'Resolved' &&
+        request.status !== 'Cancelled'
+    );
+  }, [assignedToMe]);
+
+  const recentRequests = useMemo(() => {
+    return [...assignedToMe]
+      .sort(
+        (a, b) =>
+          new Date(b.createdAtUtc).getTime() -
+          new Date(a.createdAtUtc).getTime()
+      )
+      .slice(0, 6);
+  }, [assignedToMe]);
+
+  const getPriorityColor = (priority: string) => {
+    switch (priority) {
+      case 'Emergency':
+        return '#DC2626';
+      case 'High':
+        return '#EA580C';
+      case 'Medium':
+        return '#2563EB';
+      case 'Low':
+        return '#16A34A';
+      default:
+        return '#64748B';
+    }
+  };
+
+  const getStatusColor = (status: string) => {
+    switch (status) {
+      case 'Open':
+        return '#2563EB';
+      case 'Assigned':
+        return '#7C3AED';
+      case 'InProgress':
+        return '#EA580C';
+      case 'OnHold':
+        return '#64748B';
+      case 'Resolved':
+        return '#16A34A';
+      case 'Cancelled':
+        return '#DC2626';
+      default:
+        return '#64748B';
+    }
+  };
+
+  const formatStatus = (status: string) => {
+    if (status === 'InProgress') {
+      return 'In Progress';
+    }
+
+    return status;
+  };
+
+  const formatDate = (date: string) => {
+    return new Intl.DateTimeFormat('en-US', {
+      month: 'short',
+      day: 'numeric',
+      year: 'numeric',
+    }).format(new Date(date));
+  };
 
   const firstName = user?.firstName || 'there';
 
+  const stats = [
+    {
+      title: 'Open requests',
+      value: loading ? '—' : String(openRequests.length),
+      detail: 'Maintenance work requiring attention',
+      icon: <BuildIcon />,
+      color: COLORS.primary,
+    },
+    {
+      title: 'Assigned to me',
+      value: loading ? '—' : String(myOpen.length),
+      detail: 'Active requests assigned to you',
+      icon: <AssignmentIndIcon />,
+      color: COLORS.purple,
+    },
+    {
+      title: 'In progress',
+      value: loading ? '—' : String(myInProgress.length),
+      detail: 'Requests currently being worked on',
+      icon: <TrendingUpIcon />,
+      color: COLORS.orange,
+    },
+    {
+      title: 'High priority',
+      value: loading ? '—' : String(urgentRequests.length),
+      detail: 'High or emergency requests',
+      icon: <WarningAmberIcon />,
+      color: COLORS.red,
+    },
+  ];
+
+  return (
+    <Box
+      sx={(theme) => ({
+        width: '100%',
+        minWidth: 0,
+        minHeight: '100%',
+        backgroundColor: theme.palette.background.default,
+        color: theme.palette.text.primary,
+        px: { xs: 2, sm: 3, md: 4 },
+        py: { xs: 2.5, md: 3.5 },
+      })}
+    >
+      {/* HEADER */}
+
+      <Box
+        sx={{
+          display: 'flex',
+          justifyContent: 'space-between',
+          alignItems: { xs: 'flex-start', sm: 'center' },
+          flexDirection: { xs: 'column', sm: 'row' },
+          gap: 2,
+          mb: 3,
+        }}
+      >
+        <Box sx={{ minWidth: 0 }}>
+          <Box
+            sx={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: 1,
+              mb: 0.75,
+            }}
+          >
+            <Typography
+              variant="body2"
+              sx={{
+                color: COLORS.primary,
+                fontWeight: 700,
+              }}
+            >
+              MAINTENANCE
+            </Typography>
+
+            <Box
+              sx={{
+                width: 5,
+                height: 5,
+                borderRadius: '50%',
+                backgroundColor: COLORS.primary,
+              }}
+            />
+
+            <Typography
+              variant="body2"
+              color="text.secondary"
+            >
+              Dashboard
+            </Typography>
+          </Box>
+
+          <Typography
+            variant="h4"
+            component="h1"
+            sx={(theme) => ({
+              fontWeight: 800,
+              color: theme.palette.text.primary,
+              fontSize: {
+                xs: '1.65rem',
+                sm: '2rem',
+                md: '2.15rem',
+              },
+              letterSpacing: '-0.025em',
+              lineHeight: 1.2,
+            })}
+          >
+            Good morning, {firstName}
+          </Typography>
+
+          <Typography
+            sx={(theme) => ({
+              mt: 0.75,
+              color: theme.palette.text.secondary,
+              fontSize: '0.95rem',
+            })}
+          >
+            Here is the latest maintenance work requiring your attention.
+          </Typography>
+        </Box>
+
+        <Button
+          variant="contained"
+          startIcon={<AddIcon />}
+          onClick={() =>
+            navigate('/maintenance-requests/create')
+          }
+          sx={{
+            flexShrink: 0,
+            px: 2.25,
+            py: 1.1,
+            borderRadius: 2,
+            textTransform: 'none',
+            fontWeight: 700,
+            boxShadow: '0 6px 16px rgba(37, 99, 235, 0.2)',
+          }}
+        >
+          Create request
+        </Button>
+      </Box>
+
+      {/* ERROR */}
+
+      {error && (
+        <Alert
+          severity="error"
+          sx={{
+            mb: 3,
+            borderRadius: 2.5,
+          }}
+        >
+          Failed to load maintenance data: {error}
+        </Alert>
+      )}
+
+      {/* STATUS BANNER */}
+
+      <Paper
+        elevation={0}
+        sx={(theme) => ({
+          mb: 3,
+          px: { xs: 2, sm: 2.5 },
+          py: 1.75,
+          borderRadius: 2.5,
+          border: `1px solid ${
+            theme.palette.mode === 'dark'
+              ? 'rgba(59, 130, 246, 0.35)'
+              : '#BFDBFE'
+          }`,
+          background:
+            theme.palette.mode === 'dark'
+              ? 'linear-gradient(90deg, rgba(30, 64, 175, 0.22) 0%, rgba(15, 23, 42, 0.7) 100%)'
+              : 'linear-gradient(90deg, #EFF6FF 0%, #FFFFFF 100%)',
+        })}
+      >
+        <Box
+          sx={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: 1.5,
+          }}
+        >
+          <Box
+            sx={{
+              width: 38,
+              height: 38,
+              flexShrink: 0,
+              display: 'grid',
+              placeItems: 'center',
+              borderRadius: 2,
+              backgroundColor: 'rgba(37, 99, 235, 0.12)',
+              color: COLORS.primary,
+            }}
+          >
+            <BuildIcon fontSize="small" />
+          </Box>
+
+          <Box sx={{ minWidth: 0 }}>
+            <Typography
+              variant="body2"
+              sx={{
+                fontWeight: 700,
+                color: COLORS.primary,
+              }}
+            >
+              Maintenance workspace
+            </Typography>
+
+            <Typography
+              variant="caption"
+              color="text.secondary"
+            >
+              Focus on assigned requests and outstanding maintenance work.
+            </Typography>
+          </Box>
+        </Box>
+      </Paper>
+
+      {/* STATISTICS */}
+
+      <Box
+        sx={{
+          display: 'grid',
+          gridTemplateColumns: {
+            xs: '1fr',
+            sm: 'repeat(2, minmax(0, 1fr))',
+            lg: 'repeat(4, minmax(0, 1fr))',
+          },
+          gap: 2,
+          mb: 3,
+        }}
+      >
+        {stats.map((stat) => (
+          <DashboardStatCard
+            key={stat.title}
+            {...stat}
+          />
+        ))}
+      </Box>
+
+      {/* MAIN CONTENT */}
+
+      <Box
+        sx={{
+          display: 'grid',
+          gridTemplateColumns: {
+            xs: '1fr',
+            lg: 'minmax(0, 1.7fr) minmax(320px, 0.8fr)',
+          },
+          gap: 3,
+          alignItems: 'start',
+        }}
+      >
+        {/* MY RECENT WORK */}
+
+        <Paper
+          elevation={0}
+          sx={(theme) => ({
+            border: `1px solid ${theme.palette.divider}`,
+            borderRadius: 3,
+            overflow: 'hidden',
+            backgroundColor: theme.palette.background.paper,
+          })}
+        >
+          <Box
+            sx={(theme) => ({
+              px: { xs: 2, sm: 3 },
+              py: 2.25,
+              borderBottom: `1px solid ${theme.palette.divider}`,
+              display: 'flex',
+              justifyContent: 'space-between',
+              alignItems: 'center',
+              gap: 2,
+            })}
+          >
+            <Box sx={{ minWidth: 0 }}>
+              <Typography
+                variant="h6"
+                sx={{
+                  fontWeight: 750,
+                }}
+              >
+                My recent work
+              </Typography>
+
+              <Typography
+                variant="body2"
+                color="text.secondary"
+                sx={{ mt: 0.35 }}
+              >
+                Maintenance requests assigned to you
+              </Typography>
+            </Box>
+
+            <Button
+              size="small"
+              endIcon={<ArrowForwardIcon />}
+              onClick={() =>
+                navigate('/maintenance-requests')
+              }
+              sx={{
+                flexShrink: 0,
+                textTransform: 'none',
+                fontWeight: 600,
+              }}
+            >
+              View all
+            </Button>
+          </Box>
+
+          <Box sx={{ px: { xs: 2, sm: 3 } }}>
+            {loading ? (
+              <Box
+                sx={{
+                  py: 8,
+                  textAlign: 'center',
+                }}
+              >
+                <Typography color="text.secondary">
+                  Loading maintenance requests...
+                </Typography>
+              </Box>
+            ) : recentRequests.length === 0 ? (
+              <Box
+                sx={{
+                  py: 8,
+                  textAlign: 'center',
+                }}
+              >
+                <Avatar
+                  sx={{
+                    width: 54,
+                    height: 54,
+                    mx: 'auto',
+                    mb: 1.5,
+                    backgroundColor: 'rgba(37, 99, 235, 0.12)',
+                    color: COLORS.primary,
+                  }}
+                >
+                  <BuildIcon />
+                </Avatar>
+
+                <Typography
+                  sx={{
+                    fontWeight: 700,
+                  }}
+                >
+                  No assigned requests
+                </Typography>
+
+                <Typography
+                  variant="body2"
+                  color="text.secondary"
+                  sx={{
+                    mt: 0.5,
+                    maxWidth: 420,
+                    mx: 'auto',
+                  }}
+                >
+                  You currently have no maintenance requests assigned to you.
+                </Typography>
+              </Box>
+            ) : (
+              <Stack divider={<Divider flexItem />}>
+                {recentRequests.map((request) => (
+                  <Box
+                    key={request.id}
+                    sx={{
+                      py: 2,
+                      display: 'flex',
+                      alignItems: {
+                        xs: 'flex-start',
+                        sm: 'center',
+                      },
+                      gap: 1.5,
+                      flexDirection: {
+                        xs: 'column',
+                        sm: 'row',
+                      },
+                    }}
+                  >
+                    <Avatar
+                      sx={{
+                        width: 42,
+                        height: 42,
+                        backgroundColor: `${getPriorityColor(
+                          request.priority
+                        )}14`,
+                        color: getPriorityColor(
+                          request.priority
+                        ),
+                      }}
+                    >
+                      <BuildIcon fontSize="small" />
+                    </Avatar>
+
+                    <Box
+                      sx={{
+                        flex: 1,
+                        minWidth: 0,
+                      }}
+                    >
+                      <Typography
+                        variant="body2"
+                        sx={{
+                          fontWeight: 700,
+                        }}
+                      >
+                        {request.title}
+                      </Typography>
+
+                      <Typography
+                        variant="body2"
+                        color="text.secondary"
+                        sx={{ mt: 0.3 }}
+                      >
+                        {request.propertyName}
+                        {request.unitNumber
+                          ? ` · Unit ${request.unitNumber}`
+                          : ' · Property-wide'}
+                      </Typography>
+
+                      <Typography
+                        variant="caption"
+                        color="text.secondary"
+                      >
+                        Created {formatDate(request.createdAtUtc)}
+                      </Typography>
+                    </Box>
+
+               <Stack
+                  direction="row"
+                  spacing={2}
+                  sx={{ alignItems: 'center' }}
+                >
+                      <Chip
+                        label={request.priority}
+                        size="small"
+                        sx={{
+                          fontWeight: 650,
+                          color: getPriorityColor(
+                            request.priority
+                          ),
+                          backgroundColor: `${getPriorityColor(
+                            request.priority
+                          )}14`,
+                        }}
+                      />
+
+                      <Chip
+                        label={formatStatus(request.status)}
+                        size="small"
+                        sx={{
+                          fontWeight: 650,
+                          color: getStatusColor(
+                            request.status
+                          ),
+                          backgroundColor: `${getStatusColor(
+                            request.status
+                          )}14`,
+                        }}
+                      />
+                    </Stack>
+
+                    <Button
+                      size="small"
+                      endIcon={<ArrowForwardIcon />}
+                      onClick={() =>
+                        navigate(
+                          `/maintenance-requests/${request.id}`
+                        )
+                      }
+                      sx={{
+                        textTransform: 'none',
+                        fontWeight: 600,
+                        flexShrink: 0,
+                      }}
+                    >
+                      View
+                    </Button>
+                  </Box>
+                ))}
+              </Stack>
+            )}
+          </Box>
+        </Paper>
+
+        {/* WORK SUMMARY */}
+
+        <Paper
+          elevation={0}
+          sx={(theme) => ({
+            border: `1px solid ${theme.palette.divider}`,
+            borderRadius: 3,
+            overflow: 'hidden',
+            backgroundColor: theme.palette.background.paper,
+          })}
+        >
+          <Box
+            sx={(theme) => ({
+              px: { xs: 2, sm: 3 },
+              py: 2.25,
+              borderBottom: `1px solid ${theme.palette.divider}`,
+            })}
+          >
+            <Typography
+              variant="h6"
+              sx={{
+                fontWeight: 750,
+              }}
+            >
+              Work summary
+            </Typography>
+
+            <Typography
+              variant="body2"
+              color="text.secondary"
+              sx={{ mt: 0.35 }}
+            >
+              Current maintenance workload
+            </Typography>
+          </Box>
+
+          <Box sx={{ p: { xs: 2, sm: 3 } }}>
+            <Stack spacing={1.5}>
+              <Box
+                sx={{
+                  p: 1.5,
+                  borderRadius: 2,
+                  backgroundColor: 'rgba(37, 99, 235, 0.10)',
+                  display: 'flex',
+                  justifyContent: 'space-between',
+                  alignItems: 'center',
+                }}
+              >
+                <Box
+                  sx={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 1,
+                  }}
+                >
+                  <BuildIcon
+                    sx={{
+                      color: COLORS.primary,
+                      fontSize: 20,
+                    }}
+                  />
+
+                  <Typography
+                    variant="body2"
+                    color="text.secondary"
+                  >
+                    Total requests
+                  </Typography>
+                </Box>
+
+                <Typography
+                  variant="body2"
+                  sx={{ fontWeight: 750 }}
+                >
+                  {loading ? '—' : requests.length}
+                </Typography>
+              </Box>
+
+              <Box
+                sx={{
+                  p: 1.5,
+                  borderRadius: 2,
+                  backgroundColor: 'rgba(124, 58, 237, 0.10)',
+                  display: 'flex',
+                  justifyContent: 'space-between',
+                  alignItems: 'center',
+                }}
+              >
+                <Box
+                  sx={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 1,
+                  }}
+                >
+                  <AssignmentIndIcon
+                    sx={{
+                      color: COLORS.purple,
+                      fontSize: 20,
+                    }}
+                  />
+
+                  <Typography
+                    variant="body2"
+                    color="text.secondary"
+                  >
+                    Assigned to me
+                  </Typography>
+                </Box>
+
+                <Typography
+                  variant="body2"
+                  sx={{ fontWeight: 750 }}
+                >
+                  {loading ? '—' : assignedToMe.length}
+                </Typography>
+              </Box>
+
+              <Box
+                sx={{
+                  p: 1.5,
+                  borderRadius: 2,
+                  backgroundColor: 'rgba(234, 88, 12, 0.10)',
+                  display: 'flex',
+                  justifyContent: 'space-between',
+                  alignItems: 'center',
+                }}
+              >
+                <Box
+                  sx={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 1,
+                  }}
+                >
+                  <TrendingUpIcon
+                    sx={{
+                      color: COLORS.orange,
+                      fontSize: 20,
+                    }}
+                  />
+
+                  <Typography
+                    variant="body2"
+                    color="text.secondary"
+                  >
+                    In progress
+                  </Typography>
+                </Box>
+
+                <Typography
+                  variant="body2"
+                  sx={{ fontWeight: 750 }}
+                >
+                  {loading ? '—' : inProgressRequests.length}
+                </Typography>
+              </Box>
+
+              <Box
+                sx={{
+                  p: 1.5,
+                  borderRadius: 2,
+                  backgroundColor: 'rgba(220, 38, 38, 0.10)',
+                  display: 'flex',
+                  justifyContent: 'space-between',
+                  alignItems: 'center',
+                }}
+              >
+                <Box
+                  sx={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 1,
+                  }}
+                >
+                  <WarningAmberIcon
+                    sx={{
+                      color: COLORS.red,
+                      fontSize: 20,
+                    }}
+                  />
+
+                  <Typography
+                    variant="body2"
+                    color="text.secondary"
+                  >
+                    High priority
+                  </Typography>
+                </Box>
+
+                <Typography
+                  variant="body2"
+                  sx={{ fontWeight: 750 }}
+                >
+                  {loading ? '—' : urgentRequests.length}
+                </Typography>
+              </Box>
+            </Stack>
+
+            <Button
+              fullWidth
+              variant="outlined"
+              endIcon={<ArrowForwardIcon />}
+              onClick={() =>
+                navigate('/maintenance-requests')
+              }
+              sx={{
+                mt: 2.5,
+                py: 1.1,
+                borderRadius: 2,
+                textTransform: 'none',
+                fontWeight: 650,
+              }}
+            >
+              Open maintenance requests
+            </Button>
+          </Box>
+        </Paper>
+
+        {/* QUICK ACTIONS */}
+
+        <Paper
+          elevation={0}
+          sx={(theme) => ({
+            border: `1px solid ${theme.palette.divider}`,
+            borderRadius: 3,
+            overflow: 'hidden',
+            backgroundColor: theme.palette.background.paper,
+          })}
+        >
+          <Box
+            sx={(theme) => ({
+              px: { xs: 2, sm: 3 },
+              py: 2.25,
+              borderBottom: `1px solid ${theme.palette.divider}`,
+            })}
+          >
+            <Typography
+              variant="h6"
+              sx={{
+                fontWeight: 750,
+              }}
+            >
+              Quick actions
+            </Typography>
+
+            <Typography
+              variant="body2"
+              color="text.secondary"
+              sx={{ mt: 0.35 }}
+            >
+              Common maintenance tasks
+            </Typography>
+          </Box>
+
+          <Box sx={{ p: { xs: 2, sm: 3 } }}>
+            <Stack spacing={1}>
+              <Button
+                variant="outlined"
+                startIcon={<BuildIcon />}
+                onClick={() =>
+                  navigate('/maintenance-requests')
+                }
+                sx={{
+                  justifyContent: 'flex-start',
+                  py: 1.25,
+                  px: 1.5,
+                  borderRadius: 2,
+                  textTransform: 'none',
+                  fontWeight: 600,
+                }}
+              >
+                View maintenance requests
+              </Button>
+
+              <Button
+                variant="outlined"
+                startIcon={<AddIcon />}
+                onClick={() =>
+                  navigate('/maintenance-requests/create')
+                }
+                sx={{
+                  justifyContent: 'flex-start',
+                  py: 1.25,
+                  px: 1.5,
+                  borderRadius: 2,
+                  textTransform: 'none',
+                  fontWeight: 600,
+                }}
+              >
+                Create maintenance request
+              </Button>
+            </Stack>
+          </Box>
+        </Paper>
+      </Box>
+    </Box>
+  );
+};
+
+const TenantDashboard = ({ user }: { user: any }) => {
+  const navigate = useNavigate();
+
+  const [rent, setRent] = useState<any>(null);
+  const [payments, setPayments] = useState<any[]>([]);
+  const [maintenanceRequests, setMaintenanceRequests] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
+
+  useEffect(() => {
+    const loadTenantDashboard = async () => {
+      try {
+        setLoading(true);
+        setError('');
+
+        const [rentData, paymentData, maintenanceData] =
+          await Promise.all([
+            paymentsApi.getMyRent(),
+            paymentsApi.getAll(),
+            maintenanceRequestsApi.getAll(),
+          ]);
+
+        setRent(rentData);
+        setPayments(paymentData);
+        setMaintenanceRequests(maintenanceData);
+      } catch (err: any) {
+        console.error('Failed to load tenant dashboard:', err);
+
+        setError(
+          err?.response?.data?.message ||
+            'Failed to load your dashboard.'
+        );
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    loadTenantDashboard();
+  }, []);
+
+  const formatCurrency = (amount: number) => {
+    return new Intl.NumberFormat('en-US', {
+      style: 'currency',
+      currency: 'ETB',
+      maximumFractionDigits: 2,
+    }).format(amount || 0);
+  };
+
+  const formatDate = (date: string | null | undefined) => {
+    if (!date) return '—';
+
+    return new Date(date).toLocaleDateString('en-US', {
+      year: 'numeric',
+      month: 'short',
+      day: 'numeric',
+    });
+  };
+
+  const getStatusColor = (status: string) => {
+    switch (status?.toLowerCase()) {
+      case 'completed':
+      case 'resolved':
+        return 'success';
+
+      case 'pending':
+        return 'warning';
+
+      case 'inprogress':
+      case 'in progress':
+        return 'info';
+
+      case 'failed':
+      case 'cancelled':
+        return 'error';
+
+      default:
+        return 'default';
+    }
+  };
+
+  if (loading) {
+    return (
+      <Box sx={{ p: 3 }}>
+        <Typography variant="h5" sx={{ fontWeight: 700, mb: 2 }}>
+          Welcome, {user?.fullName || user?.name || 'Tenant'}
+        </Typography>
+
+        <LinearProgress />
+      </Box>
+    );
+  }
+
+  return (
+    <Box sx={{ p: { xs: 2, md: 3 } }}>
+      {/* Header */}
+      <Box
+        sx={{
+          display: 'flex',
+          justifyContent: 'space-between',
+          alignItems: { xs: 'flex-start', md: 'center' },
+          gap: 2,
+          mb: 3,
+          flexDirection: { xs: 'column', md: 'row' },
+        }}
+      >
+        <Box>
+          <Typography variant="h4" sx={{ fontWeight: 700 }}>
+            Welcome, {user?.fullName || user?.name || 'Tenant'}
+          </Typography>
+
+          <Typography color="text.secondary" sx={{ mt: 0.5 }}>
+            Here is an overview of your rental and maintenance activity.
+          </Typography>
+        </Box>
+
+        <Stack direction="row" spacing={1}>
+          <Button
+            variant="outlined"
+            startIcon={<BuildIcon />}
+            onClick={() => navigate('/maintenance-requests/create')}
+          >
+            Report Maintenance
+          </Button>
+
+          {rent?.remainingAmount > 0 && (
+            <Button
+              variant="contained"
+              startIcon={<PaymentsIcon />}
+              onClick={() => navigate('/payments')}
+            >
+              Pay Rent
+            </Button>
+          )}
+        </Stack>
+      </Box>
+
+      {error && (
+        <Alert severity="error" sx={{ mb: 3 }}>
+          {error}
+        </Alert>
+      )}
+
+      {/* Rent Statistics */}
+      <Box
+        sx={{
+          display: 'grid',
+          gridTemplateColumns: {
+            xs: '1fr',
+            sm: 'repeat(2, 1fr)',
+            lg: 'repeat(4, 1fr)',
+          },
+          gap: 2,
+          mb: 3,
+        }}
+      >
+        <DashboardStatCard
+          title="Current Rent"
+          value={formatCurrency(rent?.rentAmount || 0)}
+          icon={<PaymentsIcon />}
+        />
+
+        <DashboardStatCard
+          title="Paid"
+          value={formatCurrency(rent?.paidAmount || 0)}
+          icon={<CheckCircleIcon />}
+        />
+
+        <DashboardStatCard
+          title="Remaining"
+          value={formatCurrency(rent?.remainingAmount || 0)}
+          icon={<WarningAmberIcon />}
+        />
+
+        <DashboardStatCard
+          title="Next Due Date"
+          value={formatDate(rent?.dueDate)}
+          icon={<CalendarMonthOutlinedIcon />}
+        />
+      </Box>
+
+      {/* Unit / Rent Overview */}
+      <Box
+        sx={{
+          display: 'grid',
+          gridTemplateColumns: {
+            xs: '1fr',
+            lg: '1fr 1fr',
+          },
+          gap: 3,
+          mb: 3,
+        }}
+      >
+        <Card>
+          <CardContent>
+            <Stack
+  direction="row"
+  spacing={2}
+  sx={{ alignItems: 'center' }}
+>
+              <Box>
+                <Typography variant="h6" sx={{ fontWeight: 700 }}>
+                  My Rental
+                </Typography>
+
+                <Typography
+                  variant="body2"
+                  color="text.secondary"
+                >
+                  Current lease information
+                </Typography>
+              </Box>
+
+              <Avatar>
+                <HomeWorkIcon />
+              </Avatar>
+            </Stack>
+
+            <Divider sx={{ mb: 2 }} />
+
+            <Stack spacing={2}>
+              <Box>
+                <Typography
+                  variant="body2"
+                  color="text.secondary"
+                >
+                  Unit
+                </Typography>
+
+                <Typography sx={{ fontWeight: 600 }}>
+                  {rent?.unitNumber || 'No active unit'}
+                </Typography>
+              </Box>
+
+              <Box>
+                <Typography
+                  variant="body2"
+                  color="text.secondary"
+                >
+                  Monthly Rent
+                </Typography>
+
+                <Typography sx={{ fontWeight: 600 }}>
+                  {formatCurrency(rent?.rentAmount || 0)}
+                </Typography>
+              </Box>
+
+              <Box>
+                <Typography
+                  variant="body2"
+                  color="text.secondary"
+                >
+                  Payment Status
+                </Typography>
+
+                <Chip
+                  label={rent?.status || 'Unknown'}
+                  color={getStatusColor(rent?.status || '') as any}
+                  size="small"
+                />
+              </Box>
+
+              <Box>
+                <Typography
+                  variant="body2"
+                  color="text.secondary"
+                >
+                  Due Date
+                </Typography>
+
+                <Typography sx={{ fontWeight: 600 }}>
+                  {formatDate(rent?.dueDate)}
+                </Typography>
+              </Box>
+            </Stack>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardContent>
+       <Stack
+  direction="row"
+  spacing={2}
+  sx={{ alignItems: 'center' }}
+>
+              <Box>
+                <Typography variant="h6" sx={{ fontWeight: 700 }}>
+                  Payment Summary
+                </Typography>
+
+                <Typography
+                  variant="body2"
+                  color="text.secondary"
+                >
+                  Your current rent payment
+                </Typography>
+              </Box>
+
+              <Avatar>
+                <PaymentsIcon />
+              </Avatar>
+            </Stack>
+
+            <Divider sx={{ mb: 2 }} />
+
+            <Stack spacing={2}>
+              <Box>
+             <Stack
+  direction="row"
+  spacing={2}
+  sx={{ alignItems: 'center' }}
+>
+                  <Typography variant="body2">
+                    Rent
+                  </Typography>
+
+                  <Typography variant="body2" sx={{ fontWeight: 600 }}>
+                    {formatCurrency(rent?.rentAmount || 0)}
+                  </Typography>
+                </Stack>
+
+                <LinearProgress
+                  variant="determinate"
+                  value={
+                    rent?.rentAmount
+                      ? Math.min(
+                          100,
+                          (rent.paidAmount / rent.rentAmount) * 100
+                        )
+                      : 0
+                  }
+                />
+              </Box>
+
+             <Stack
+  direction="row"
+  spacing={2}
+  sx={{ alignItems: 'center' }}
+>
+                <Typography color="text.secondary">
+                  Paid
+                </Typography>
+
+                <Typography sx={{ fontWeight: 600 }}>
+                  {formatCurrency(rent?.paidAmount || 0)}
+                </Typography>
+              </Stack>
+
+              <Stack
+  direction="row"
+  spacing={2}
+  sx={{ alignItems: 'center' }}
+>
+                <Typography color="text.secondary">
+                  Remaining
+                </Typography>
+
+                <Typography
+                  sx={{ fontWeight: 700 }}
+                  color={
+                    rent?.remainingAmount > 0
+                      ? 'warning.main'
+                      : 'success.main'
+                  }
+                >
+                  {formatCurrency(rent?.remainingAmount || 0)}
+                </Typography>
+              </Stack>
+
+              {rent?.remainingAmount > 0 && (
+                <Button
+                  fullWidth
+                  variant="contained"
+                  startIcon={<PaymentsIcon />}
+                  onClick={() => navigate('/payments')}
+                >
+                  Pay Rent
+                </Button>
+              )}
+            </Stack>
+          </CardContent>
+        </Card>
+      </Box>
+
+      {/* Maintenance Requests */}
+      <Card sx={{ mb: 3 }}>
+        <CardContent>
+          <Stack
+  direction="row"
+  spacing={2}
+  sx={{ alignItems: 'center' }}
+>
+            <Box>
+              <Typography variant="h6" sx={{ fontWeight: 700 }}>
+                My Maintenance Requests
+              </Typography>
+
+              <Typography
+                variant="body2"
+                color="text.secondary"
+              >
+                Track maintenance issues reported for your unit.
+              </Typography>
+            </Box>
+
+            <Button
+              endIcon={<ArrowForwardIcon />}
+              onClick={() => navigate('/maintenance-requests')}
+            >
+              View All
+            </Button>
+          </Stack>
+
+          <Divider sx={{ mb: 2 }} />
+
+          {maintenanceRequests.length === 0 ? (
+            <Box
+              sx={{
+                py: 4,
+                textAlign: 'center',
+              }}
+            >
+              <BuildIcon
+                sx={{
+                  fontSize: 42,
+                  color: 'text.secondary',
+                  mb: 1,
+                }}
+              />
+
+              <Typography color="text.secondary">
+                You have no maintenance requests.
+              </Typography>
+
+              <Button
+                sx={{ mt: 2 }}
+                variant="outlined"
+                startIcon={<BuildIcon />}
+                onClick={() =>
+                  navigate('/maintenance-requests/create')
+                }
+              >
+                Report a Problem
+              </Button>
+            </Box>
+          ) : (
+            <Stack spacing={1.5}>
+              {maintenanceRequests
+                .slice(0, 5)
+                .map((request) => (
+                  <Paper
+                    key={request.id}
+                    variant="outlined"
+                    sx={{ p: 2 }}
+                  >
+                    <Stack
+                      direction={{
+                        xs: 'column',
+                        sm: 'row',
+                      }}
+                      sx={{
+                        gap: 1,
+                        justifyContent: 'space-between',
+                        alignItems: 'center',
+                     }}
+                    >
+                      <Box>
+                        <Typography sx={{ fontWeight: 600 }}>
+                          {request.title}
+                        </Typography>
+
+                        <Typography
+                          variant="body2"
+                          color="text.secondary"
+                        >
+                          {request.description}
+                        </Typography>
+
+                        <Typography
+                          variant="caption"
+                          color="text.secondary"
+                        >
+                          Created {formatDate(request.createdAtUtc)}
+                        </Typography>
+                      </Box>
+
+                      <Stack direction="row" spacing={1}>
+                        <Chip
+                          label={request.priority}
+                          size="small"
+                          variant="outlined"
+                        />
+
+                        <Chip
+                          label={request.status}
+                          size="small"
+                          color={
+                            getStatusColor(
+                              request.status
+                            ) as any
+                          }
+                        />
+                      </Stack>
+                    </Stack>
+                  </Paper>
+                ))}
+            </Stack>
+          )}
+        </CardContent>
+      </Card>
+
+      {/* Recent Payments */}
+      <Card>
+        <CardContent>
+          <Stack
+  direction="row"
+  spacing={2}
+  sx={{ alignItems: 'center' }}
+>
+            <Box>
+              <Typography variant="h6" sx={{ fontWeight: 700 }}>
+                Recent Payments
+              </Typography>
+
+              <Typography
+                variant="body2"
+                color="text.secondary"
+              >
+                Your latest payment activity.
+              </Typography>
+            </Box>
+
+            <Button
+              endIcon={<ArrowForwardIcon />}
+              onClick={() => navigate('/payments')}
+            >
+              View Payments
+            </Button>
+          </Stack>
+
+          <Divider sx={{ mb: 2 }} />
+
+          {payments.length === 0 ? (
+            <Typography color="text.secondary">
+              No payment history available.
+            </Typography>
+          ) : (
+            <Stack spacing={1.5}>
+              {payments.slice(0, 5).map((payment) => (
+                <Paper
+                  key={payment.id}
+                  variant="outlined"
+                  sx={{ p: 2 }}
+                >
+                     <Stack
+                        direction={{
+                          xs: 'column',
+                          sm: 'row',
+                        }}
+                        sx={{
+                          gap: 1,
+                          justifyContent: 'space-between',
+                          alignItems: 'center',
+                        }}
+                      >
+                    <Box>
+                      <Typography sx={{ fontWeight: 600 }}>
+                        {payment.paymentType || 'Payment'}
+                      </Typography>
+
+                      <Typography
+                        variant="body2"
+                        color="text.secondary"
+                      >
+                        {formatDate(payment.paymentDate)}
+                      </Typography>
+                    </Box>
+
+                    <Stack
+  direction="row"
+  spacing={1}
+  sx={{ alignItems: 'center' }}
+>
+                      <Typography sx={{ fontWeight: 700 }}>
+                        {formatCurrency(payment.amount)}
+                      </Typography>
+
+                      <Chip
+                        label={payment.status}
+                        size="small"
+                        color={
+                          getStatusColor(
+                            payment.status
+                          ) as any
+                        }
+                      />
+                    </Stack>
+                  </Stack>
+                </Paper>
+              ))}
+            </Stack>
+          )}
+        </CardContent>
+      </Card>
+    </Box>
+  );
+};
+
+const DashboardPage = () => {
+  const { user } = useAuth();
+
+  if (user?.role === 'MaintenanceStaff') {
+    return <MaintenanceStaffDashboard user={user} />;
+  }
+
+  if (user?.role === 'Tenant') {
+    return <TenantDashboard user={user} />;
+  }
+  const navigate = useNavigate();
+  const firstName = user?.firstName || 'there';
   const [propertyCount, setPropertyCount] = useState(0);
   const [unitCount, setUnitCount] = useState(0);
   const [maintenanceCount, setMaintenanceCount] = useState(0);

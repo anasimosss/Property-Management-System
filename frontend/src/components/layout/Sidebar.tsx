@@ -30,10 +30,10 @@ import AssessmentOutlinedIcon from '@mui/icons-material/AssessmentOutlined';
 import AccountBalanceOutlinedIcon from '@mui/icons-material/AccountBalanceOutlined';
 import DonutLargeOutlinedIcon from '@mui/icons-material/DonutLargeOutlined';
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
-import { useAuth } from '../../context/AuthContext';
 import AssignmentTurnedInIcon from '@mui/icons-material/AssignmentTurnedIn';
 import SearchIcon from '@mui/icons-material/Search';
 
+import { useAuth } from '../../context/AuthContext';
 
 interface NavItem {
   label: string;
@@ -42,38 +42,72 @@ interface NavItem {
 }
 
 const navItems: NavItem[] = [
-  { label: 'Dashboard', path: '/dashboard', icon: <DashboardIcon /> },
-  { label: 'Properties', path: '/properties', icon: <ApartmentIcon /> },
-  { label: 'Buildings', path: '/buildings', icon: <BusinessIcon /> },
-  { label: 'Units', path: '/units', icon: <DoorFrontIcon /> },
   {
-  label: 'Available Units',
-  path: '/available-units',
-  icon: <SearchIcon />,
-},
+    label: 'Dashboard',
+    path: '/dashboard',
+    icon: <DashboardIcon />,
+  },
+  {
+    label: 'Properties',
+    path: '/properties',
+    icon: <ApartmentIcon />,
+  },
+  {
+    label: 'Buildings',
+    path: '/buildings',
+    icon: <BusinessIcon />,
+  },
+  {
+    label: 'Units',
+    path: '/units',
+    icon: <DoorFrontIcon />,
+  },
+  {
+    label: 'Available Units',
+    path: '/available-units',
+    icon: <SearchIcon />,
+  },
   {
     label: 'Unit Requests',
     path: '/unit-requests',
     icon: <AssignmentTurnedInIcon />,
   },
   {
-  label: 'My Requests',
-  path: '/my-unit-requests',
-  icon: <AssignmentTurnedInIcon />,
-},
-  { label: 'Tenants', path: '/tenants', icon: <PeopleIcon /> },
-  { label: 'Users', path: '/users', icon: <PeopleIcon /> },
-  { label: 'Leases', path: '/leases', icon: <DescriptionIcon /> },
-  { label: 'Payments', path: '/payments', icon: <PaymentIcon /> },
-  { label: 'Expenses', path: '/expenses', icon: <ReceiptIcon /> },
+    label: 'My Requests',
+    path: '/my-unit-requests',
+    icon: <AssignmentTurnedInIcon />,
+  },
+  {
+    label: 'Tenants',
+    path: '/tenants',
+    icon: <PeopleIcon />,
+  },
+  {
+    label: 'Users',
+    path: '/users',
+    icon: <PeopleIcon />,
+  },
+  {
+    label: 'Leases',
+    path: '/leases',
+    icon: <DescriptionIcon />,
+  },
+  {
+    label: 'Payments',
+    path: '/payments',
+    icon: <PaymentIcon />,
+  },
+  {
+    label: 'Expenses',
+    path: '/expenses',
+    icon: <ReceiptIcon />,
+  },
   {
     label: 'Maintenance',
     path: '/maintenance-requests',
     icon: <BuildIcon />,
   },
 ];
-
-
 
 const reportItems: NavItem[] = [
   {
@@ -107,8 +141,14 @@ const Sidebar = ({ open, onClose, mobile = false }: SidebarProps) => {
 
   const { user } = useAuth();
 
-  const isAdmin = user?.role === 'Admin';
-  const isTenant = user?.role === 'Tenant';
+  const userRole = user?.role;
+
+  const isAdmin = userRole === 'Admin';
+  const isPropertyManager = userRole === 'PropertyManager';
+  const isTenant = userRole === 'Tenant';
+  const isMaintenanceStaff = userRole === 'MaintenanceStaff';
+
+  const isManagementRole = isAdmin || isPropertyManager;
 
   const hasActiveReport = reportItems.some((item) =>
     location.pathname.startsWith(item.path)
@@ -123,6 +163,68 @@ const Sidebar = ({ open, onClose, mobile = false }: SidebarProps) => {
       onClose();
     }
   };
+
+  const canShowNavItem = (item: NavItem) => {
+    /*
+     * Admin and Property Manager
+     * --------------------------------
+     * They can access the complete management navigation.
+     */
+    if (isManagementRole) {
+      // Users is Admin-only.
+      if (item.path === '/users') {
+        return isAdmin;
+      }
+
+      return true;
+    }
+
+    /*
+     * Tenant
+     * --------------------------------
+     * Tenants can browse properties and buildings,
+     * view available units, manage their own requests,
+     * leases, payments, and maintenance.
+     *
+     * They cannot access management modules.
+     */
+    if (isTenant) {
+      return [
+        '/dashboard',
+        '/available-units',
+        '/my-unit-requests',
+        '/leases',
+        '/payments',
+        '/maintenance-requests',
+      ].includes(item.path);
+    }
+
+    /*
+     * Maintenance Staff
+     * --------------------------------
+     * Maintenance staff should have a focused
+     * maintenance-oriented workspace.
+     */
+    if (isMaintenanceStaff) {
+      return [
+        '/dashboard',
+        '/maintenance-requests',
+      ].includes(item.path);
+    }
+
+    /*
+     * Fallback
+     * --------------------------------
+     * If the user has an unknown or missing role,
+     * only show Dashboard.
+     */
+    return item.path === '/dashboard';
+  };
+
+const showReports =
+  user?.role === 'Admin' ||
+  user?.role === 'PropertyManager' ||
+  user?.role === 'MaintenanceStaff';
 
   const sidebarContent = (
     <Box
@@ -188,24 +290,7 @@ const Sidebar = ({ open, onClose, mobile = false }: SidebarProps) => {
       {/* Navigation */}
       <List sx={{ flexGrow: 1, py: 2 }}>
         {navItems
-          .filter((item) => {
-            // Tenant cannot access these modules.
-            if (isTenant) {
-  return ![
-    '/tenants',
-    '/users',
-    '/expenses',
-    '/unit-requests',
-  ].includes(item.path);
-}
-
-            // Only Admin can access Users.
-            if (item.path === '/users') {
-              return isAdmin;
-            }
-
-            return true;
-          })
+          .filter(canShowNavItem)
           .map((item) => {
             const isActive =
               location.pathname === item.path ||
@@ -259,7 +344,7 @@ const Sidebar = ({ open, onClose, mobile = false }: SidebarProps) => {
           })}
 
         {/* Reports */}
-        {!isTenant && (
+        {showReports && (
           <>
             <ListItem disablePadding sx={{ px: 1 }}>
               <ListItemButton
@@ -325,7 +410,12 @@ const Sidebar = ({ open, onClose, mobile = false }: SidebarProps) => {
               unmountOnExit
             >
               <List disablePadding>
-                {reportItems.map((item) => {
+                {(isMaintenanceStaff
+  ? reportItems.filter((item) =>
+      item.label.toLowerCase().includes('maintenance')
+    )
+  : reportItems
+).map((item) => {
                   const isActive =
                     location.pathname.startsWith(item.path);
 

@@ -20,4 +20,6 @@ public class User
     public ICollection<Expense> RecordedExpenses { get; set; } = new List<Expense>();
     public ICollection<MaintenanceRequest> ReportedMaintenanceRequests { get; set; } = new List<MaintenanceRequest>();
     public ICollection<MaintenanceRequest> AssignedMaintenanceRequests { get; set; } = new List<MaintenanceRequest>();
+
+    public ICollection<Notification> Notifications { get; set; } = new List<Notification>();
 }

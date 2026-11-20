@@ -282,6 +282,53 @@ namespace PropertyManagement.Api.Migrations
                     b.ToTable("MaintenanceRequests");
                 });
 
+            modelBuilder.Entity("PropertyManagement.Api.Entities.Notification", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("int");
+
+                    SqlServerPropertyBuilderExtensions.UseIdentityColumn(b.Property<int>("Id"));
+
+                    b.Property<DateTime>("CreatedAtUtc")
+                        .HasColumnType("datetime2");
+
+                    b.Property<bool>("IsRead")
+                        .HasColumnType("bit");
+
+                    b.Property<string>("Message")
+                        .IsRequired()
+                        .HasMaxLength(1000)
+                        .HasColumnType("nvarchar(1000)");
+
+                    b.Property<string>("NotificationKey")
+                        .HasMaxLength(200)
+                        .HasColumnType("nvarchar(200)");
+
+                    b.Property<string>("Title")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("nvarchar(200)");
+
+                    b.Property<string>("Type")
+                        .IsRequired()
+                        .HasMaxLength(50)
+                        .HasColumnType("nvarchar(50)");
+
+                    b.Property<int>("UserId")
+                        .HasColumnType("int");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("NotificationKey")
+                        .IsUnique()
+                        .HasFilter("[NotificationKey] IS NOT NULL");
+
+                    b.HasIndex("UserId", "IsRead", "CreatedAtUtc");
+
+                    b.ToTable("Notifications");
+                });
+
             modelBuilder.Entity("PropertyManagement.Api.Entities.Payment", b =>
                 {
                     b.Property<int>("Id")
@@ -697,6 +744,17 @@ namespace PropertyManagement.Api.Migrations
                     b.Navigation("Unit");
                 });
 
+            modelBuilder.Entity("PropertyManagement.Api.Entities.Notification", b =>
+                {
+                    b.HasOne("PropertyManagement.Api.Entities.User", "User")
+                        .WithMany("Notifications")
+                        .HasForeignKey("UserId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("User");
+                });
+
             modelBuilder.Entity("PropertyManagement.Api.Entities.Payment", b =>
                 {
                     b.HasOne("PropertyManagement.Api.Entities.Lease", "Lease")
@@ -795,6 +853,8 @@ namespace PropertyManagement.Api.Migrations
             modelBuilder.Entity("PropertyManagement.Api.Entities.User", b =>
                 {
                     b.Navigation("AssignedMaintenanceRequests");
+
+                    b.Navigation("Notifications");
 
                     b.Navigation("RecordedExpenses");
 

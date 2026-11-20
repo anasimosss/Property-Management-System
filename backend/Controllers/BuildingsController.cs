@@ -95,7 +95,7 @@ public async Task<IActionResult> GetMyBuildings()
     /// Returns buildings belonging to a specific property. Available to all authenticated users.
     /// </summary>
     [HttpGet("by-property/{propertyId:int}")]
-[Authorize(Roles = "Admin,PropertyManager")]
+[Authorize(Roles = "Admin,PropertyManager,MaintenanceStaff")]
     [ProducesResponseType(typeof(IReadOnlyList<BuildingResponse>), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status401Unauthorized)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
